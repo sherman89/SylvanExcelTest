@@ -1,25 +1,53 @@
 ﻿using Sylvan.Data;
 using Sylvan.Data.Excel;
 using System.Data.Common;
+using SylvanExcelTest;
 
-class Program
+internal class Program
 {
-    static int Main()
+    private static int Main()
     {
-        const string UserNameEn = "Users";
-        var userSchemaEn = Schema.Parse("Id:int,First name>FirstName:string,Last name>LastName:string,Age:int");
-        const string UserNameFi = "Käyttäjät";
-        var userSchemaFi = Schema.Parse("Id:int,Etunimi>FirstName:string,Sukunimi>LastName:string,Age:int");
-        const string EmailNameEn = "E-mails";
-        var emailSchemaEn = Schema.Parse("Id:int,UserId:int,E-mail address>Email:string");
-        const string EmailNameFi = "Sähköpostit";
-        var emailSchemaFi = Schema.Parse("Id:int,KäyttäjäId>UserId:int,Sähköposti>Email:string");
+        // TODO: Exception handling (report unbound columns/properties)
+        // TODO: Handle GetOrdinal errors in validators
+
+        const string userNameEn = "Users";
+        var userSchemaEn = new Schema.Builder()
+            .Add("Id", typeof(int))
+            .Add("First name", nameof(UserRecord.FirstName), typeof(string))
+            .Add("Last name", nameof(UserRecord.LastName), typeof(string))
+            .Add("Age", typeof(int))
+            .Add("weird, column (name)!", "Test", typeof(string))
+            .Build();
+
+        const string userNameFi = "Käyttäjät";
+        var userSchemaFi = new Schema.Builder()
+            .Add("Id", typeof(int))
+            .Add("Etunimi", nameof(UserRecord.FirstName), typeof(string))
+            .Add("Sukunimi", nameof(UserRecord.LastName), typeof(string))
+            .Add("Ikä", typeof(int))
+            .Add("weird, column (name)!", "Test", typeof(string))
+            .Build();
+
+        const string emailNameEn = "E-mails";
+        var emailSchemaEn = new Schema.Builder()
+            .Add("Id", typeof(int))
+            .Add("UserId", nameof(EmailRecord.UserId), typeof(string))
+            .Add("E-mail address", nameof(EmailRecord.Email), typeof(string))
+            .Build();
+
+        const string emailNameFi = "Sähköpostit";
+        var emailSchemaFi = new Schema.Builder()
+            .Add("Id", typeof(int))
+            .Add("KäyttäjäId", nameof(EmailRecord.UserId), typeof(string))
+            .Add("Sähköposti", nameof(EmailRecord.Email), typeof(string))
+            .Build();
+
 
         var schema = new ExcelSchema();
-        schema.Add(UserNameEn, true, userSchemaEn);
-        schema.Add(EmailNameEn, true, emailSchemaEn);
-        schema.Add(UserNameFi, true, userSchemaFi);
-        schema.Add(EmailNameFi, true, emailSchemaFi);
+        schema.Add(userNameEn, true, userSchemaEn);
+        schema.Add(emailNameEn, true, emailSchemaEn);
+        schema.Add(userNameFi, true, userSchemaFi);
+        schema.Add(emailNameFi, true, emailSchemaFi);
 
         var opts = new ExcelDataReaderOptions { Schema = schema };
 
@@ -27,51 +55,52 @@ class Program
         using var edr = ExcelDataReader.Create("TestData/Data_ENG2.xlsx", opts);
 
         // These collections will receive the valid data.
-        List<UserRecord> users = null;
-        List<EmailRecord> emails = null;
+        List<UserRecord>? users = null;
+        List<EmailRecord>? emails = null;
+
+        var errors = new List<string>();
 
         do
         {
-            Validator validator = null;
+            Validator validator;
             switch (edr.WorksheetName)
             {
-                case UserNameEn:
+                case userNameEn:
                     validator = new UserValidator(edr, userSchemaEn);
                     break;
-                case UserNameFi:
+                case userNameFi:
                     validator = new UserValidator(edr, userSchemaFi);
                     break;
-                case EmailNameEn:
+                case emailNameEn:
                     validator = new EmailValidator(edr, emailSchemaEn);
                     break;
-                case EmailNameFi:
+                case emailNameFi:
                     validator = new EmailValidator(edr, emailSchemaFi);
                     break;
                 default:
-                    Console.WriteLine("Unknown worksheet " + edr.WorksheetName);
+                    continue;
+            }
+
+            var reader = edr.Validate(context => validator.Validate(context, errors));
+
+            switch (validator)
+            {
+                case UserValidator:
+                    users = reader.GetRecords<UserRecord>().ToList();
+                    break;
+                case EmailValidator:
+                    emails = reader.GetRecords<EmailRecord>().ToList();
                     break;
             }
-
-            if (validator != null)
-            {
-                var reader = edr.Validate(validator.Validate);
-
-                if (validator is UserValidator)
-                {
-                    users = reader.GetRecords<UserRecord>().ToList();
-                }
-
-                if (validator is EmailValidator)
-                {
-                    emails = reader.GetRecords<EmailRecord>().ToList();
-                }
-            }
-
         } while (edr.NextResult());
+
+        // output errors
+        Console.WriteLine("Errors:");
+        errors.ForEach(Console.WriteLine);
 
         // output the valid records.
         Console.WriteLine();
-        Console.WriteLine("Results:");
+        Console.WriteLine("Valid results:");
         if (users != null)
         {
             Console.WriteLine("Users:");
@@ -93,89 +122,93 @@ class Program
         return 0;
     }
 
-    abstract class Validator
+    private abstract class Validator
     {
-        public bool Validate(DataValidationContext context)
+        public bool Validate(DataValidationContext context, List<string> errors)
         {
-            ExcelDataReader edr = (ExcelDataReader)context.DataReader;
-            var valid = LogSchemaErrors(context, edr);
-            valid &= ValidateCustom(context, edr);
+            var edr = (ExcelDataReader)context.DataReader;
 
-            if (valid)
-            {
-                Console.WriteLine($"Valid {edr.WorksheetName} {edr.RowNumber}");
-            }
+            var valid = LogSchemaErrors(context, edr, errors);
+            valid &= ValidateCustom(context, edr, errors);
+
             return valid;
         }
 
-        protected abstract bool ValidateCustom(DataValidationContext context, ExcelDataReader edr);
+        protected abstract bool ValidateCustom(DataValidationContext context, ExcelDataReader edr, List<string> errors);
 
-        protected void LogError(ExcelDataReader dr, int ord)
+        protected void LogError(ExcelDataReader dr, int ord, List<string> errors)
         {
             var name = dr.GetName(ord);
             var value = dr.GetString(ord); // always safe to GetString
             var type = dr.GetDataTypeName(ord);
-            Console.WriteLine($"Invalid {name} at row {dr.RowNumber} col {ord} value '{value}'.");
+
+            var colPosition = ExcelHelpers.GetExcelColumnName(ord + 1);
+            errors.Add($"Invalid {name} at position \"{colPosition}:{dr.RowNumber}\" value '{value}'.");
         }
 
-        protected bool LogSchemaErrors(DataValidationContext context, ExcelDataReader dr)
+        private bool LogSchemaErrors(DataValidationContext context, ExcelDataReader dr, List<string> errors)
         {
             var valid = true;
             foreach (var ord in context.GetErrors())
             {
-                LogError(dr, ord);
+                LogError(dr, ord, errors);
                 valid = false;
             }
             return valid;
         }
     }
 
-    class UserValidator : Validator
+    private class UserValidator : Validator
     {
-        int idOrd, fnOrd, lnOrd, ageOrd;
+        private readonly int _idOrd;
+        private readonly int _fnOrd;
+        private readonly int _lnOrd;
+        private readonly int _ageOrd;
 
-        HashSet<int> seenIds = new HashSet<int>();
+        private readonly HashSet<int> _seenIds = [];
 
         public UserValidator(DbDataReader reader, Schema schema)
         {
-            idOrd = reader.GetOrdinal(schema[0].ColumnName);
-            fnOrd = reader.GetOrdinal(schema[1].ColumnName);
-            lnOrd = reader.GetOrdinal(schema[2].ColumnName);
-            ageOrd = reader.GetOrdinal(schema[3].ColumnName);
+            // TODO: Log exceptions
+            _idOrd = reader.GetOrdinal(schema[0].ColumnName);
+            _fnOrd = reader.GetOrdinal(schema[1].ColumnName);
+            _lnOrd = reader.GetOrdinal(schema[2].ColumnName);
+            _ageOrd = reader.GetOrdinal(schema[3].ColumnName);
         }
 
-        protected override bool ValidateCustom(DataValidationContext context, ExcelDataReader dr)
+        protected override bool ValidateCustom(DataValidationContext context, ExcelDataReader dr, List<string> errors)
         {
             var valid = true;
-
-            if (context.IsValid(idOrd))
+            
+            if (context.IsValid(_idOrd))
             {
-                var id = context.GetValue<int>(idOrd);
-                if (!seenIds.Add(id))
+                var id = context.GetValue<int>(_idOrd);
+                if (!_seenIds.Add(id))
                 {
-                    // already seen it
-                    Console.WriteLine($"Duplicate Id at row {dr.RowNumber} col {idOrd} value '{id}'.");
+                    var colPosition = ExcelHelpers.GetExcelColumnName(_idOrd + 1);
+                    errors.Add($"Duplicate Id at position \"{colPosition}:{dr.RowNumber}\" value '{id}'.");
                 }
             }
 
-            var fn = dr.GetString(fnOrd);
+            var fn = dr.GetString(_fnOrd);
             if (string.IsNullOrEmpty(fn))
             {
-                LogError(dr, fnOrd);
+                LogError(dr, _fnOrd, errors);
                 valid = false;
             }
 
-            var ln = dr.GetString(lnOrd);
+            var ln = dr.GetString(_lnOrd);
             if (string.IsNullOrEmpty(ln))
             {
-                LogError(dr, lnOrd);
+                LogError(dr, _lnOrd, errors);
                 valid = false;
             }
 
-            var age = context.GetValue<int>(ageOrd);
+            // Note: default value is returned if cell has invalid string. Potentially an issue but probably not.
+            var age = context.GetValue<int>(_ageOrd);
             if (age < 0)
             {
-                LogError(dr, ageOrd);
+                LogError(dr, _ageOrd, errors);
                 valid = false;
             }
 
@@ -183,39 +216,51 @@ class Program
         }
     }
 
-    class EmailValidator : Validator
+    private class EmailValidator : Validator
     {
-        int idOrd, userOrd, emailOrd;
+        private readonly int _idOrd, _userOrd, _emailOrd;
 
         public EmailValidator(DbDataReader reader, Schema schema)
         {
-            idOrd = reader.GetOrdinal(schema[0].ColumnName);
-            userOrd = reader.GetOrdinal(schema[1].ColumnName);
-            emailOrd = reader.GetOrdinal(schema[2].ColumnName);
+            // TODO: Log exceptions
+            _idOrd = reader.GetOrdinal(schema[0].ColumnName);
+            _userOrd = reader.GetOrdinal(schema[1].ColumnName);
+            _emailOrd = reader.GetOrdinal(schema[2].ColumnName);
         }
 
-        protected override bool ValidateCustom(DataValidationContext context, ExcelDataReader edr)
+        protected override bool ValidateCustom(DataValidationContext context, ExcelDataReader edr, List<string> errors)
         {
-            var valid = true;
-            var email = edr.GetString(emailOrd);
-            if (!email.Contains("@"))
+            var isValid = true;
+
+            var email = edr.GetString(_emailOrd);
+            if (!email.Contains('@'))
             {
-                LogError(edr, emailOrd);
-                valid = false;
+                LogError(edr, _emailOrd, errors);
+                isValid = false;
             }
 
-            return valid;
+            return isValid;
         }
     }
 
 }
 
-static class Ex
+internal static class ExtensionMethods
 {
     // I will add an efficient version of this API to Sylvan.Data
     public static bool IsValid(this DataValidationContext c, int ord)
     {
         // this is a bit slower than it needs to be
         return c.GetErrors().Contains(ord) == false;
+    }
+
+    public static Schema.Builder Add(this Schema.Builder builder, string name, Type type)
+    {
+        return builder.Add(new Schema.Column.Builder { ColumnName = name, DataType = type });
+    }
+
+    public static Schema.Builder Add(this Schema.Builder builder, string? baseName, string name, Type type)
+    {
+        return builder.Add(new Schema.Column.Builder { BaseColumnName = baseName, ColumnName = name, DataType = type });
     }
 }
