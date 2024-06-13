@@ -7,13 +7,13 @@ class Program
     static int Main()
     {
         const string UserNameEn = "Users";
-        var userSchemaEn = Schema.Parse("Id:int,First name:string,Last name:string,Age:int");
+        var userSchemaEn = Schema.Parse("Id:int,First name>FirstName:string,Last name>LastName:string,Age:int");
         const string UserNameFi = "Käyttäjät";
-        var userSchemaFi = Schema.Parse("Id:int,Etunimi:string,Sukunimi:string,Age:int");
+        var userSchemaFi = Schema.Parse("Id:int,Etunimi>FirstName:string,Sukunimi>LastName:string,Age:int");
         const string EmailNameEn = "E-mails";
-        var emailSchemaEn = Schema.Parse("Id:int,UserId:int,E-mail address:string");
+        var emailSchemaEn = Schema.Parse("Id:int,UserId:int,E-mail address>Email:string");
         const string EmailNameFi = "Sähköpostit";
-        var emailSchemaFi = Schema.Parse("Id:int,KäyttäjäId:int,Sähköposti:string");
+        var emailSchemaFi = Schema.Parse("Id:int,KäyttäjäId>UserId:int,Sähköposti>Email:string");
 
         var schema = new ExcelSchema();
         schema.Add(UserNameEn, true, userSchemaEn);
@@ -25,7 +25,11 @@ class Program
 
         // this new file has some extra validation examples
         using var edr = ExcelDataReader.Create("TestData/Data_ENG2.xlsx", opts);
-            
+
+        // These collections will receive the valid data.
+        List<UserRecord> users = null;
+        List<EmailRecord> emails = null;
+
         do
         {
             Validator validator = null;
@@ -51,14 +55,40 @@ class Program
             if (validator != null)
             {
                 var reader = edr.Validate(validator.Validate);
-                while (reader.Read())
+
+                if (validator is UserValidator)
                 {
-                    // only valid rows are yielded in the loop
-                    Console.WriteLine($"Valid {edr.WorksheetName} {edr.RowNumber}");
+                    users = reader.GetRecords<UserRecord>().ToList();
+                }
+
+                if (validator is EmailValidator)
+                {
+                    emails = reader.GetRecords<EmailRecord>().ToList();
                 }
             }
 
         } while (edr.NextResult());
+
+        // output the valid records.
+        Console.WriteLine();
+        Console.WriteLine("Results:");
+        if (users != null)
+        {
+            Console.WriteLine("Users:");
+            foreach (var user in users)
+            {
+                Console.WriteLine(user);
+            }
+        }
+
+        if (emails != null)
+        {
+            Console.WriteLine("Emails:");
+            foreach (var email in emails)
+            {
+                Console.WriteLine(email);
+            }
+        }
 
         return 0;
     }
@@ -67,9 +97,14 @@ class Program
     {
         public bool Validate(DataValidationContext context)
         {
-            ExcelDataReader edr = (ExcelDataReader) context.DataReader;
+            ExcelDataReader edr = (ExcelDataReader)context.DataReader;
             var valid = LogSchemaErrors(context, edr);
             valid &= ValidateCustom(context, edr);
+
+            if (valid)
+            {
+                Console.WriteLine($"Valid {edr.WorksheetName} {edr.RowNumber}");
+            }
             return valid;
         }
 
@@ -98,7 +133,7 @@ class Program
     class UserValidator : Validator
     {
         int idOrd, fnOrd, lnOrd, ageOrd;
-        
+
         HashSet<int> seenIds = new HashSet<int>();
 
         public UserValidator(DbDataReader reader, Schema schema)
@@ -113,7 +148,7 @@ class Program
         {
             var valid = true;
 
-            if (context.IsValid(idOrd)) 
+            if (context.IsValid(idOrd))
             {
                 var id = context.GetValue<int>(idOrd);
                 if (!seenIds.Add(id))
