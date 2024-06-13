@@ -18,10 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="TestData\Data_ENG.xlsx">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="TestData\Data_FIN.xlsx">
+    <None Update="TestData\*.xlsx">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
