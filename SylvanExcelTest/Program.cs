@@ -16,7 +16,6 @@ internal class Program
             .Add("First name", nameof(UserRecord.FirstName), typeof(string))
             .Add("Last name", nameof(UserRecord.LastName), typeof(string))
             .Add("Age", typeof(int))
-            .Add("weird, column (name)!", "Test", typeof(string))
             .Build();
 
         const string userNameFi = "Käyttäjät";
@@ -25,7 +24,6 @@ internal class Program
             .Add("Etunimi", nameof(UserRecord.FirstName), typeof(string))
             .Add("Sukunimi", nameof(UserRecord.LastName), typeof(string))
             .Add("Ikä", typeof(int))
-            .Add("weird, column (name)!", "Test", typeof(string))
             .Build();
 
         const string emailNameEn = "E-mails";
@@ -54,11 +52,16 @@ internal class Program
         // this new file has some extra validation examples
         using var edr = ExcelDataReader.Create("TestData/Data_ENG2.xlsx", opts);
 
+        // TODO: Validate that all expected worksheets are found?
+        // var worksheetNames = edr.WorksheetNames;
+
         // These collections will receive the valid data.
         List<UserRecord>? users = null;
         List<EmailRecord>? emails = null;
 
         var errors = new List<string>();
+
+        // TODO: Possible to refactor and simplify below even more?
 
         do
         {
@@ -66,31 +69,55 @@ internal class Program
             switch (edr.WorksheetName)
             {
                 case userNameEn:
+                    if (!Validator.ValidateSchema(edr, userSchemaEn, errors))
+                    {
+                        continue;
+                    }
                     validator = new UserValidator(edr, userSchemaEn);
                     break;
                 case userNameFi:
+                    if (!Validator.ValidateSchema(edr, userSchemaFi, errors))
+                    {
+                        continue;
+                    }
                     validator = new UserValidator(edr, userSchemaFi);
                     break;
                 case emailNameEn:
+                    if (!Validator.ValidateSchema(edr, emailSchemaEn, errors))
+                    {
+                        continue;
+                    }
                     validator = new EmailValidator(edr, emailSchemaEn);
                     break;
                 case emailNameFi:
+                    if (!Validator.ValidateSchema(edr, emailSchemaFi, errors))
+                    {
+                        continue;
+                    }
                     validator = new EmailValidator(edr, emailSchemaFi);
                     break;
                 default:
                     continue;
             }
 
-            var reader = edr.Validate(context => validator.Validate(context, errors));
+            var reader = edr.Validate((context) => validator.Validate(context, errors));
 
-            switch (validator)
+            try
             {
-                case UserValidator:
-                    users = reader.GetRecords<UserRecord>().ToList();
-                    break;
-                case EmailValidator:
-                    emails = reader.GetRecords<EmailRecord>().ToList();
-                    break;
+                switch (validator)
+                {
+                    case UserValidator:
+                        users = reader.GetRecords<UserRecord>().ToList();
+                        break;
+                    case EmailValidator:
+                        emails = reader.GetRecords<EmailRecord>().ToList();
+                        break;
+                }
+            }
+            catch (UnboundMemberException ume)
+            {
+                // AFAIK In this setup it's only possible to get this if there's a bug in the code
+                Console.WriteLine(ume);
             }
         } while (edr.NextResult());
 
@@ -124,6 +151,23 @@ internal class Program
 
     private abstract class Validator
     {
+        public static bool ValidateSchema(DbDataReader reader, Schema schema, List<string> errors)
+        {
+            var excelSchema = reader.GetColumnSchema();
+
+            foreach (var dbColumn in schema)
+            {
+                // If current columns do not contain expected column name, log error
+                if (excelSchema.All(c => c.BaseColumnName != dbColumn.BaseColumnName))
+                {
+                    errors.Add($"Expected to find column \"{dbColumn.BaseColumnName}\" but did not.");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         public bool Validate(DataValidationContext context, List<string> errors)
         {
             var edr = (ExcelDataReader)context.DataReader;
@@ -169,7 +213,6 @@ internal class Program
 
         public UserValidator(DbDataReader reader, Schema schema)
         {
-            // TODO: Log exceptions
             _idOrd = reader.GetOrdinal(schema[0].ColumnName);
             _fnOrd = reader.GetOrdinal(schema[1].ColumnName);
             _lnOrd = reader.GetOrdinal(schema[2].ColumnName);
@@ -187,6 +230,7 @@ internal class Program
                 {
                     var colPosition = ExcelHelpers.GetExcelColumnName(_idOrd + 1);
                     errors.Add($"Duplicate Id at position \"{colPosition}:{dr.RowNumber}\" value '{id}'.");
+                    valid = false;
                 }
             }
 
@@ -247,16 +291,9 @@ internal class Program
 
 internal static class ExtensionMethods
 {
-    // I will add an efficient version of this API to Sylvan.Data
-    public static bool IsValid(this DataValidationContext c, int ord)
-    {
-        // this is a bit slower than it needs to be
-        return c.GetErrors().Contains(ord) == false;
-    }
-
     public static Schema.Builder Add(this Schema.Builder builder, string name, Type type)
     {
-        return builder.Add(new Schema.Column.Builder { ColumnName = name, DataType = type });
+        return builder.Add(new Schema.Column.Builder { BaseColumnName = name, ColumnName = name, DataType = type });
     }
 
     public static Schema.Builder Add(this Schema.Builder builder, string? baseName, string name, Type type)
