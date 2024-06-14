@@ -137,14 +137,8 @@ internal class Program
         // used for both first and last names
         public bool ValidateName(DataValidationContext context, int ordinal)
         {
-            var dr = context.DataReader;
-            var name = dr.GetString(ordinal);
-            if (string.IsNullOrEmpty(name))
-            {
-                LogError(context, ordinal);
-                return false;
-            }
-            return true;
+            var name = context.DataReader.GetString(ordinal);
+            return !string.IsNullOrWhiteSpace(name);
         }
 
         public bool ValidateId(DataValidationContext context, int ordinal)

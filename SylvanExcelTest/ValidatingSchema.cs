@@ -212,7 +212,21 @@ public class TableValidator
             }
             if (context.IsValid(ord))
             {
-                valid &= validator(context, ord);
+                
+                try
+                {
+                    var isValid = validator(context, ord);
+                    if (!isValid)
+                    {
+                        LogError(context, ord);
+                        valid = false;
+                    }
+                } 
+                catch(Exception ex)
+                {
+                    LogError(context, ord, ex);
+                    valid = false;
+                }
             }
         }
         return valid;
