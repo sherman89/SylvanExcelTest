@@ -39,29 +39,33 @@ internal class Program
 
         var errors = new List<string>();
 
-        // TODO: Possible to refactor and simplify below even more?
-
         do
         {
-            var name = edr.WorksheetName;
             var table = schema.FindTable(edr.WorksheetName);
-            if (table == null) continue;
+            if (table == null)
+            {
+                errors.Add($"Unknown table {edr.WorksheetName}");
+                continue;
+            }
 
             ValidateSchema(table, edr, errors);
 
+            // ask the schema for a validator for this sheet
             var validator = table.GetValidator(edr, errors);
+            // apply the validator
             var validatingReader = edr.Validate(validator.Validate);
 
+            // bind based on which table we found
             if (table == userTable)
             {
                 users = validatingReader.GetRecords<UserRecord>().ToList();
             }
+
             if (table == emailTable)
             {
                 emails = validatingReader.GetRecords<EmailRecord>().ToList();
             }
         } while (edr.NextResult());
-
 
         // output errors
         Console.WriteLine("Errors:");
