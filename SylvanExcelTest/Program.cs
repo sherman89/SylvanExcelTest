@@ -1,7 +1,7 @@
 ﻿using Sylvan.Data;
 using Sylvan.Data.Excel;
-using System.Data.Common;
 using SylvanExcelTest;
+using System.Data.Common;
 
 internal class Program
 {
@@ -10,50 +10,28 @@ internal class Program
         // TODO: Exception handling (report unbound columns/properties)
         // TODO: Handle GetOrdinal errors in validators
 
-        const string userNameEn = "Users";
-        var userSchemaEn = new Schema.Builder()
-            .Add("Id", typeof(int))
-            .Add("First name", nameof(UserRecord.FirstName), typeof(string))
-            .Add("Last name", nameof(UserRecord.LastName), typeof(string))
-            .Add("Age", typeof(int))
-            .Build();
+        var userTable =
+            new Table<UserValidator>("Users", ["Users", "Käyttäjät"])
+                .Add<int>("Id", ["Id"], t => t.ValidateId)
+                .Add<string>("FirstName", ["First name", "Etunimi"], t => t.ValidateName)
+                .Add<string>("LastName", ["Last name", "Sukunimi"], t => t.ValidateName)
+                .Add<int>("Age", ["Age", "Ikä"], t => t.ValidateAge);
 
-        const string userNameFi = "Käyttäjät";
-        var userSchemaFi = new Schema.Builder()
-            .Add("Id", typeof(int))
-            .Add("Etunimi", nameof(UserRecord.FirstName), typeof(string))
-            .Add("Sukunimi", nameof(UserRecord.LastName), typeof(string))
-            .Add("Ikä", typeof(int))
-            .Build();
+        var emailTable =
+            new Table<EmailValidator>("Emails", ["E-mails", "Sähköpostit"])
+                .Add<int>("Id", ["Id"])
+                .Add<int>("UserId", ["UserId", "KäyttäjäId"])
+                .Add<string>("Email", ["E-mail address", "Sähköposti"], t => t.ValidateEmail);
 
-        const string emailNameEn = "E-mails";
-        var emailSchemaEn = new Schema.Builder()
-            .Add("Id", typeof(int))
-            .Add("UserId", nameof(EmailRecord.UserId), typeof(string))
-            .Add("E-mail address", nameof(EmailRecord.Email), typeof(string))
-            .Build();
-
-        const string emailNameFi = "Sähköpostit";
-        var emailSchemaFi = new Schema.Builder()
-            .Add("Id", typeof(int))
-            .Add("KäyttäjäId", nameof(EmailRecord.UserId), typeof(string))
-            .Add("Sähköposti", nameof(EmailRecord.Email), typeof(string))
-            .Build();
-
-
-        var schema = new ExcelSchema();
-        schema.Add(userNameEn, true, userSchemaEn);
-        schema.Add(emailNameEn, true, emailSchemaEn);
-        schema.Add(userNameFi, true, userSchemaFi);
-        schema.Add(emailNameFi, true, emailSchemaFi);
+        var schema = new ValidatingSchema() { userTable, emailTable };
 
         var opts = new ExcelDataReaderOptions { Schema = schema };
 
         // this new file has some extra validation examples
-        using var edr = ExcelDataReader.Create("TestData/Data_ENG2.xlsx", opts);
+        using var edr = ExcelDataReader.Create("TestData/Data_FIN.xlsx", opts);
 
         // TODO: Validate that all expected worksheets are found?
-        // var worksheetNames = edr.WorksheetNames;
+        // var worksheetNames = edr.WorksheetNames;        
 
         // These collections will receive the valid data.
         List<UserRecord>? users = null;
@@ -61,63 +39,31 @@ internal class Program
 
         var errors = new List<string>();
 
-        // TODO: Possible to refactor and simplify below even more?
-
         do
         {
-            Validator validator;
-            switch (edr.WorksheetName)
+            var table = schema.FindTable(edr.WorksheetName);
+            if (table == null)
             {
-                case userNameEn:
-                    if (!Validator.ValidateSchema(edr, userSchemaEn, errors))
-                    {
-                        continue;
-                    }
-                    validator = new UserValidator(edr, userSchemaEn);
-                    break;
-                case userNameFi:
-                    if (!Validator.ValidateSchema(edr, userSchemaFi, errors))
-                    {
-                        continue;
-                    }
-                    validator = new UserValidator(edr, userSchemaFi);
-                    break;
-                case emailNameEn:
-                    if (!Validator.ValidateSchema(edr, emailSchemaEn, errors))
-                    {
-                        continue;
-                    }
-                    validator = new EmailValidator(edr, emailSchemaEn);
-                    break;
-                case emailNameFi:
-                    if (!Validator.ValidateSchema(edr, emailSchemaFi, errors))
-                    {
-                        continue;
-                    }
-                    validator = new EmailValidator(edr, emailSchemaFi);
-                    break;
-                default:
-                    continue;
+                errors.Add($"Unknown table {edr.WorksheetName}");
+                continue;
             }
 
-            var reader = edr.Validate((context) => validator.Validate(context, errors));
+            ValidateSchema(table, edr, errors);
 
-            try
+            // ask the schema for a validator for this sheet
+            var validator = table.GetValidator(edr, errors);
+            // apply the validator
+            var validatingReader = edr.Validate(validator.Validate);
+
+            // bind based on which table we found
+            if (table == userTable)
             {
-                switch (validator)
-                {
-                    case UserValidator:
-                        users = reader.GetRecords<UserRecord>().ToList();
-                        break;
-                    case EmailValidator:
-                        emails = reader.GetRecords<EmailRecord>().ToList();
-                        break;
-                }
+                users = validatingReader.GetRecords<UserRecord>().ToList();
             }
-            catch (UnboundMemberException ume)
+
+            if (table == emailTable)
             {
-                // AFAIK In this setup it's only possible to get this if there's a bug in the code
-                Console.WriteLine(ume);
+                emails = validatingReader.GetRecords<EmailRecord>().ToList();
             }
         } while (edr.NextResult());
 
@@ -149,155 +95,84 @@ internal class Program
         return 0;
     }
 
-    private abstract class Validator
+    static bool ValidateSchema(Table schema, DbDataReader reader, List<string> errors)
     {
-        public static bool ValidateSchema(DbDataReader reader, Schema schema, List<string> errors)
-        {
-            var excelSchema = reader.GetColumnSchema();
+        var excelSchema = reader.GetColumnSchema();
 
-            foreach (var dbColumn in schema)
+        // Note that this allows "mixing" of FIN and ENG named columns.
+        foreach (var dbColumn in schema)
+        {
+            // If current columns do not contain expected column name, log error
+            if (excelSchema.All(c => dbColumn.Aliases.Any(a => a == c.BaseColumnName)))
             {
-                // If current columns do not contain expected column name, log error
-                if (excelSchema.All(c => c.BaseColumnName != dbColumn.BaseColumnName))
-                {
-                    errors.Add($"Expected to find column \"{dbColumn.BaseColumnName}\" but did not.");
-                    return false;
-                }
+                errors.Add($"Expected to find column \"{dbColumn.BaseColumnName}\" but did not.");
+                return false;
             }
-
-            return true;
         }
 
-        public bool Validate(DataValidationContext context, List<string> errors)
+        return true;
+    }
+
+    abstract class LoggingValidator : TableValidator
+    {
+        protected List<string> errors;
+
+        public override void SetState(object? o)
         {
-            var edr = (ExcelDataReader)context.DataReader;
-
-            var valid = LogSchemaErrors(context, edr, errors);
-            valid &= ValidateCustom(context, edr, errors);
-
-            return valid;
+            ArgumentNullException.ThrowIfNull(o);
+            this.errors = (List<string>)o;
         }
 
-        protected abstract bool ValidateCustom(DataValidationContext context, ExcelDataReader edr, List<string> errors);
-
-        protected void LogError(ExcelDataReader dr, int ord, List<string> errors)
+        public override void LogError(DataValidationContext context, int ord, Exception ex = null)
         {
+            var dr = context.DataReader;
             var name = dr.GetName(ord);
             var value = dr.GetString(ord); // always safe to GetString
             var type = dr.GetDataTypeName(ord);
-
+            var row = context.RowNumber;
             var colPosition = ExcelHelpers.GetExcelColumnName(ord + 1);
-            errors.Add($"Invalid {name} at position \"{colPosition}:{dr.RowNumber}\" value '{value}'.");
-        }
-
-        private bool LogSchemaErrors(DataValidationContext context, ExcelDataReader dr, List<string> errors)
-        {
-            var valid = true;
-            foreach (var ord in context.GetErrors())
-            {
-                LogError(dr, ord, errors);
-                valid = false;
-            }
-            return valid;
-        }
+            // depending on the implementation of the DbDataReader, this might be expensive.
+            var baseName = dr.GetColumnSchema()[ord].BaseColumnName;
+            errors.Add($"Invalid {name} at position {row},{ord} ({colPosition}/{baseName}) value '{value}'.");
+        }                
     }
 
-    private class UserValidator : Validator
+    class UserValidator : LoggingValidator
     {
-        private readonly int _idOrd;
-        private readonly int _fnOrd;
-        private readonly int _lnOrd;
-        private readonly int _ageOrd;
-
         private readonly HashSet<int> _seenIds = [];
 
-        public UserValidator(DbDataReader reader, Schema schema)
+        // used for both first and last names
+        public bool ValidateName(DataValidationContext context, int ordinal)
         {
-            _idOrd = reader.GetOrdinal(schema[0].ColumnName);
-            _fnOrd = reader.GetOrdinal(schema[1].ColumnName);
-            _lnOrd = reader.GetOrdinal(schema[2].ColumnName);
-            _ageOrd = reader.GetOrdinal(schema[3].ColumnName);
+            var name = context.DataReader.GetString(ordinal);
+            return !string.IsNullOrWhiteSpace(name);
         }
 
-        protected override bool ValidateCustom(DataValidationContext context, ExcelDataReader dr, List<string> errors)
+        public bool ValidateId(DataValidationContext context, int ordinal)
         {
-            var valid = true;
-            
-            if (context.IsValid(_idOrd))
+            var id = context.DataReader.GetInt32(ordinal);
+            if (!_seenIds.Add(id))
             {
-                var id = context.GetValue<int>(_idOrd);
-                if (!_seenIds.Add(id))
-                {
-                    var colPosition = ExcelHelpers.GetExcelColumnName(_idOrd + 1);
-                    errors.Add($"Duplicate Id at position \"{colPosition}:{dr.RowNumber}\" value '{id}'.");
-                    valid = false;
-                }
+                var colPosition = ExcelHelpers.GetExcelColumnName(ordinal + 1);
+                errors.Add($"Duplicate Id at position \"{colPosition}:{context.RowNumber}\" value '{id}'.");
+                return false;
             }
+            return true;
+        }
 
-            var fn = dr.GetString(_fnOrd);
-            if (string.IsNullOrEmpty(fn))
-            {
-                LogError(dr, _fnOrd, errors);
-                valid = false;
-            }
-
-            var ln = dr.GetString(_lnOrd);
-            if (string.IsNullOrEmpty(ln))
-            {
-                LogError(dr, _lnOrd, errors);
-                valid = false;
-            }
-
-            // Note: default value is returned if cell has invalid string. Potentially an issue but probably not.
-            var age = context.GetValue<int>(_ageOrd);
-            if (age < 0)
-            {
-                LogError(dr, _ageOrd, errors);
-                valid = false;
-            }
-
-            return valid;
+        public bool ValidateAge(DataValidationContext context, int ordinal)
+        {
+            var age = context.DataReader.GetInt32(ordinal);
+            return age > 0 && age < 120;
         }
     }
 
-    private class EmailValidator : Validator
+    class EmailValidator : LoggingValidator
     {
-        private readonly int _idOrd, _userOrd, _emailOrd;
-
-        public EmailValidator(DbDataReader reader, Schema schema)
+        public bool ValidateEmail(DataValidationContext context, int ordinal)
         {
-            // TODO: Log exceptions
-            _idOrd = reader.GetOrdinal(schema[0].ColumnName);
-            _userOrd = reader.GetOrdinal(schema[1].ColumnName);
-            _emailOrd = reader.GetOrdinal(schema[2].ColumnName);
+            var email = context.DataReader.GetString(ordinal);
+            return !email.Contains('@');
         }
-
-        protected override bool ValidateCustom(DataValidationContext context, ExcelDataReader edr, List<string> errors)
-        {
-            var isValid = true;
-
-            var email = edr.GetString(_emailOrd);
-            if (!email.Contains('@'))
-            {
-                LogError(edr, _emailOrd, errors);
-                isValid = false;
-            }
-
-            return isValid;
-        }
-    }
-
-}
-
-internal static class ExtensionMethods
-{
-    public static Schema.Builder Add(this Schema.Builder builder, string name, Type type)
-    {
-        return builder.Add(new Schema.Column.Builder { BaseColumnName = name, ColumnName = name, DataType = type });
-    }
-
-    public static Schema.Builder Add(this Schema.Builder builder, string? baseName, string name, Type type)
-    {
-        return builder.Add(new Schema.Column.Builder { BaseColumnName = baseName, ColumnName = name, DataType = type });
     }
 }
