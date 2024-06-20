@@ -28,7 +28,8 @@ sealed class ValidatingSchema
         if (!tableLookup.TryGetValue(sheetName, out var table))
             return null;
 
-        return table.FindColumn(sheetName, name, ordinal);
+        var col = table.FindColumn(sheetName, name, ordinal);
+        return col?.GetColumn(sheetName, name, ordinal);        
     }
 
     public override bool HasHeaders(string sheetName)
@@ -252,6 +253,18 @@ public sealed class Column : DbColumn
     internal object? validator;
 
     public IEnumerable<string> Aliases => names;
+
+    internal Column GetColumn(string? baseTableName, string? baseColumnName, int ordinal)
+    {
+        // clone the current schema col def
+        var col = (Column)this.MemberwiseClone();
+        // and set the datasource-specific values
+        col.BaseTableName = baseTableName;
+        col.BaseColumnName = baseColumnName;
+        col.ColumnOrdinal = ordinal;
+
+        return col;
+    }
 
     public Column(string name, string[] names, Type type, object? validator)
     {

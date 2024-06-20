@@ -99,10 +99,11 @@ internal class Program
     {
         var excelSchema = reader.GetColumnSchema();
 
+        // Note that this allows "mixing" of FIN and ENG named columns.
         foreach (var dbColumn in schema)
         {
             // If current columns do not contain expected column name, log error
-            if (excelSchema.All(c => c.BaseColumnName != dbColumn.BaseColumnName))
+            if (excelSchema.All(c => dbColumn.Aliases.Any(a => a == c.BaseColumnName)))
             {
                 errors.Add($"Expected to find column \"{dbColumn.BaseColumnName}\" but did not.");
                 return false;
@@ -130,7 +131,9 @@ internal class Program
             var type = dr.GetDataTypeName(ord);
             var row = context.RowNumber;
             var colPosition = ExcelHelpers.GetExcelColumnName(ord + 1);
-            errors.Add($"Invalid {name} at position {row},{ord} ({colPosition}) value '{value}'.");
+            // depending on the implementation of the DbDataReader, this might be expensive.
+            var baseName = dr.GetColumnSchema()[ord].BaseColumnName;
+            errors.Add($"Invalid {name} at position {row},{ord} ({colPosition}/{baseName}) value '{value}'.");
         }                
     }
 
