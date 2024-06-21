@@ -33,6 +33,8 @@ public class UsersSchema : BaseSchemaWrapper
             .Add("Job Title", nameof(UserRecord.JobTitle), typeof(string))
             .Build());
 
+        WorksheetNamesByLanguage.Add(WorksheetEn, Language.English);
+
         WorksheetSchemas.Add(WorksheetFi, new Schema.Builder()
             .Add("Id", nameof(UserRecord.Id), typeof(int))
             .Add("Etunimi", nameof(UserRecord.FirstName), typeof(string))
@@ -40,6 +42,8 @@ public class UsersSchema : BaseSchemaWrapper
             .Add("Ikä", nameof(UserRecord.Age), typeof(int))
             .Add("Työnimike", nameof(UserRecord.JobTitle), typeof(string))
             .Build());
+
+        WorksheetNamesByLanguage.Add(WorksheetFi, Language.Finnish);
     }
 
     public override BaseValidator? GetValidator(ExcelDataReader edr, List<string> errors)
@@ -49,6 +53,7 @@ public class UsersSchema : BaseSchemaWrapper
             throw new ArgumentException($"{nameof(edr.WorksheetName)} cannot be null!");
         }
 
+        // TODO: Use Language passed to parser, or figure out using reader worksheet?
         var worksheetLanguage = edr.WorksheetName.Equals(WorksheetFi, StringComparison.OrdinalIgnoreCase)
             ? Language.Finnish
             : Language.English;

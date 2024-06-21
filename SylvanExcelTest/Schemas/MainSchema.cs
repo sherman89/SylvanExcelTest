@@ -32,4 +32,18 @@ public class MainSchema
             ExcelSchema.Add(kvp.Key, true, kvp.Value);
         }
     }
+
+    public List<string> GetWorksheetNamesByLanguage(Language language)
+    {
+        var results = new List<string>();
+
+        // Eww...
+        foreach (var schemaWrapper in WorksheetSchemaWrappers.Values.DistinctBy(v => v.WorksheetNamesByLanguage.Keys))
+        {
+            var asd = schemaWrapper.WorksheetNamesByLanguage.Where(x => x.Value == language).Select(x => x.Key);
+            results.AddRange(asd);
+        }
+
+        return results;
+    }
 }

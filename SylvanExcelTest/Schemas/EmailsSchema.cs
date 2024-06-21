@@ -14,8 +14,11 @@ public record EmailRecord
 
 internal class EmailsSchema : BaseSchemaWrapper
 {
-    public const string WorksheetEn = "E.mails";
+    public const string WorksheetEn = "E-mails";
     public const string WorksheetFi = "Sähköpostit";
+
+    // Just to test worksheet existence validation :)
+    private const string IAMERROR = "I AM ERROR";
 
     public EmailsSchema()
     {
@@ -25,11 +28,23 @@ internal class EmailsSchema : BaseSchemaWrapper
             .Add("E-mail address", nameof(EmailRecord.Email), typeof(string))
             .Build());
 
+        WorksheetNamesByLanguage.Add(WorksheetEn, Language.English);
+
         WorksheetSchemas.Add(WorksheetFi, new Schema.Builder()
             .Add("Id", typeof(int))
             .Add("KäyttäjäId", nameof(EmailRecord.UserId), typeof(string))
             .Add("Sähköposti", nameof(EmailRecord.Email), typeof(string))
             .Build());
+
+        WorksheetNamesByLanguage.Add(WorksheetFi, Language.Finnish);
+
+        WorksheetSchemas.Add(IAMERROR, new Schema.Builder()
+            .Add("Id", typeof(int))
+            .Add("UserId", nameof(EmailRecord.UserId), typeof(string))
+            .Add("E-mail address", nameof(EmailRecord.Email), typeof(string))
+            .Build());
+
+        WorksheetNamesByLanguage.Add(IAMERROR, Language.English);
     }
 
     public override BaseValidator? GetValidator(ExcelDataReader edr, List<string> errors)
