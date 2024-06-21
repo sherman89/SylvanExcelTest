@@ -11,14 +11,14 @@ public class CodeLookupRepository
     {
         JobTitleFiCodeLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            {"CEO", "1"},
-            {"Principal Software Engineer", "5"}
+            { "Toimitusjohtaja", "1" },
+            { "Johtava ohjelmistosuunnittelija", "3" }
         };
 
         JobTitleEnCodeLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            {"Toimitusjohtaja", "1"},
-            {"Johtava ohjelmistosuunnittelija", "3"}
+            { "CEO", "1" },
+            { "Principal Software Engineer", "5" }
         };
     }
 
